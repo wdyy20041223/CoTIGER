@@ -1,0 +1,20 @@
+{
+  "split": "beauty",
+  "epoch": 4999,
+  "sha256": "9f75ca74bf6a8c4b4448d3cf78d72e2a931842129aeca9924fa627784579dfe7",
+  "optimizer_steps": [
+    59990
+  ],
+  "scheduler_last_epoch": 59990,
+  "finite_model": true,
+  "progress_bar_planned_steps": 60000,
+  "first_epoch_logged_progress_range": [
+    0,
+    2
+  ],
+  "last_evaluations": [
+    "Epoch 4950 Eval - loss: 0.1519, rec: 0.0653, vq: 0.0866, collision: 0.0421 (11016/11500)",
+    "Epoch 5000 Eval - loss: 0.1517, rec: 0.0653, vq: 0.0863, collision: 0.0423 (11013/11500)"
+  ],
+  "note": "Upstream first-step KMeans initialization nests iteration over the same training DataLoader. Full 5000 epochs preserved; actual optimizer steps retained without padding."
+}

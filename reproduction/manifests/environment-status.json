@@ -1,0 +1,9 @@
+{
+  "state": "ready",
+  "python": "3.10.12",
+  "torch": "2.6.0+cu124",
+  "cuda": "12.4",
+  "gpu": "Tesla V100-SXM2-32GB",
+  "bf16_supported": false,
+  "bf16_emulation_supported": true
+}

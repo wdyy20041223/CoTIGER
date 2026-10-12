@@ -1,0 +1,61 @@
+{
+  "state": "ready",
+  "files": [
+    {
+      "split": "beauty",
+      "filename": "reviews_Beauty_5.json.gz",
+      "bytes": 44819276,
+      "sha256": "e5925ec99023f1dc9c7d3dff7ef34cfeacd40d1b981b5525e1e4ba9c8abc18fe",
+      "source": "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Beauty_5.json.gz"
+    },
+    {
+      "split": "beauty",
+      "filename": "meta_Beauty.json.gz",
+      "bytes": 99156148,
+      "sha256": "c7977dc0e0ead14ac7df8c1c6de74da00e4bebfad87a0f0c5763d4c5bc9b53a0",
+      "source": "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/meta_Beauty.json.gz"
+    },
+    {
+      "split": "sports",
+      "filename": "reviews_Sports_and_Outdoors_5.json.gz",
+      "bytes": 68275834,
+      "sha256": "8130a2206c3062db1b4b9d4353efc303b0ebd13f48372559fee26c47a1d7fe51",
+      "source": "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Sports_and_Outdoors_5.json.gz"
+    },
+    {
+      "split": "sports",
+      "filename": "meta_Sports_and_Outdoors.json.gz",
+      "bytes": 183143051,
+      "sha256": "677108a0fe0f47cce08885a348879a5a89dd69e75fbc5d66410ae436750df086",
+      "source": "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/meta_Sports_and_Outdoors.json.gz"
+    },
+    {
+      "split": "toys",
+      "filename": "reviews_Toys_and_Games_5.json.gz",
+      "bytes": 42057555,
+      "sha256": "f9f0cc56ad6b5de15a1b0dd1c07fcfc9e7367efc73481f5d94d8065f91149286",
+      "source": "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Toys_and_Games_5.json.gz"
+    },
+    {
+      "split": "toys",
+      "filename": "meta_Toys_and_Games.json.gz",
+      "bytes": 145043023,
+      "sha256": "beffb81f3632050b28d8b0acb1ee27f0ddc2142e9a6abba293357a5312f5e876",
+      "source": "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/meta_Toys_and_Games.json.gz"
+    },
+    {
+      "split": "home",
+      "filename": "reviews_Home_and_Kitchen_5.json.gz",
+      "bytes": 138126598,
+      "sha256": "f40029d99c90856eeeb8e63c9d58cd895ed58123f2c409a71f83553debc0fc0d",
+      "source": "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Home_and_Kitchen_5.json.gz"
+    },
+    {
+      "split": "home",
+      "filename": "meta_Home_and_Kitchen.json.gz",
+      "bytes": 152367034,
+      "sha256": "49f303659700943526c39ab3aaa7e9efdd591e0edd69da0ad273f36976d4e684",
+      "source": "https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/meta_Home_and_Kitchen.json.gz"
+    }
+  ]
+}

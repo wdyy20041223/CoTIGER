@@ -1,0 +1,44 @@
+import genrec.data.amazon
+import genrec.models.rqvae as genrec2
+
+# Macros:
+# ==============================================================================
+MODEL_HUB_QWEN3_1_7B = '/root/workspace/models_hub/Qwen3-1.7B'
+MODEL_HUB_QWEN3_4B = '/root/workspace/models_hub/Qwen3-4B'
+MODEL_HUB_QWEN3_EMBEDDING_8B = '/root/workspace/models_hub/Qwen3-Embedding-8B'
+MODEL_HUB_SENTENCE_T5_BASE = '/root/workspace/models_hub/sentence-t5-base'
+MODEL_HUB_SENTENCE_T5_XL = '/root/genrec-reproduction/models_hub/sentence-t5-xl'
+
+# Parameters for AmazonItemDataset:
+# ==============================================================================
+AmazonItemDataset.split = 'beauty'
+
+# Parameters for train:
+# ==============================================================================
+train.batch_size = 1024
+train.commitment_weight = 0.25
+train.dataset = @AmazonItemDataset
+train.dataset_folder = 'dataset/amazon'
+train.do_eval = True
+train.encoder_model_name = %MODEL_HUB_SENTENCE_T5_XL
+train.epochs = 5000
+train.eval_every = 50
+train.learning_rate = 0.001
+train.save_dir_root = 'out/tiger/amazon/beauty/rqvae'
+train.save_model_every = 50
+train.vae_codebook_last_layer_mode = \
+    %genrec.models.rqvae.QuantizeForwardMode.SINKHORN
+train.vae_codebook_mode = %genrec.models.rqvae.QuantizeForwardMode.STE
+train.vae_codebook_normalize = False
+train.vae_codebook_size = 256
+train.vae_embed_dim = 32
+train.vae_hidden_dims = [512, 256, 128, 64]
+train.vae_input_dim = 768
+train.vae_n_cat_feats = 0
+train.vae_n_layers = 3
+train.vae_sim_vq = False
+train.wandb_log_interval = 100
+train.wandb_logging = False
+train.wandb_project = 'tiger_rqvae_beauty_training'
+train.warmup_epochs = 50
+train.weight_decay = 0.0001

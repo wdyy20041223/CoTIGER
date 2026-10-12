@@ -1,0 +1,11 @@
+--- a/genrec/trainers/tiger_trainer.py
++++ b/genrec/trainers/tiger_trainer.py
+@@ -228,7 +228,7 @@
+         all_recalls = {5: [], 10: []}
+         all_ndcgs = {5: [], 10: []}
+ 
+-        with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.bfloat16):
++        with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=device.type == 'cuda' and torch.cuda.is_bf16_supported(including_emulation=False)):
+             for batch in tqdm(loader, desc=desc):
+                 input_ids = batch['input_ids'].to(device)
+                 attention_mask = batch['attention_mask'].to(device)

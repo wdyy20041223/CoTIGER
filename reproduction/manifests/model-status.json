@@ -1,0 +1,90 @@
+{
+  "state": "ready",
+  "model": "sentence-transformers/sentence-t5-xl",
+  "revision": "92e07434e0b0e93b36dd780c47c9b48d32fbcdaa",
+  "files": [
+    {
+      "name": "1_Pooling/config.json",
+      "bytes": 190,
+      "sha256": "a37f83ada23e7887be6b88f4998927dbeac0038af301553c7cd5461413bf1a56",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/1_Pooling/config.json",
+      "in_archive": true
+    },
+    {
+      "name": "2_Dense/config.json",
+      "bytes": 116,
+      "sha256": "d8dfe28f975c278029485521b90a9b2ad7f11f551a862fb772e38973050a22a9",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/2_Dense/config.json",
+      "in_archive": true
+    },
+    {
+      "name": "2_Dense/model.safetensors",
+      "bytes": 3145848,
+      "sha256": "92527d75218c963886adfebdc60bcfe6f599939d4a4f13e3ddee5df231c46f68",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/2_Dense/model.safetensors",
+      "in_archive": true
+    },
+    {
+      "name": "config.json",
+      "bytes": 1387,
+      "sha256": "5eb2b9ea1f4d2fee7f1ed85054e999769e2e17a253ee4eb073474c30af8c0682",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/config.json",
+      "in_archive": true
+    },
+    {
+      "name": "config_sentence_transformers.json",
+      "bytes": 122,
+      "sha256": "f631e4bd49910419948c5e9134ab07e0d63b22b8cebbe6875f99a0712bcadd4d",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/config_sentence_transformers.json",
+      "in_archive": true
+    },
+    {
+      "name": "model.safetensors",
+      "bytes": 2481843488,
+      "sha256": "690b52fdca062e7f7b38c550fcb50be612a116632b6e45d49eeae87b763001c4",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/model.safetensors"
+    },
+    {
+      "name": "modules.json",
+      "bytes": 461,
+      "sha256": "41251094dfd3e7ff81a85ba97b3f4788df47e4039f1bc5037575b43c028beb40",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/modules.json",
+      "in_archive": true
+    },
+    {
+      "name": "sentence_bert_config.json",
+      "bytes": 53,
+      "sha256": "fc1993fde0a95c24ec6c022539d41cf6e2f7c9721e5415d6fb6897472a9cd4b7",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/sentence_bert_config.json",
+      "in_archive": true
+    },
+    {
+      "name": "special_tokens_map.json",
+      "bytes": 1786,
+      "sha256": "4720c0fddbe4c5991334f85ad7073d9bd0a294a8ba4641a2f8dab614ca825949",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/special_tokens_map.json",
+      "in_archive": true
+    },
+    {
+      "name": "spiece.model",
+      "bytes": 791656,
+      "sha256": "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/spiece.model",
+      "in_archive": true
+    },
+    {
+      "name": "tokenizer.json",
+      "bytes": 1387554,
+      "sha256": "3dd4249b57e28dda22219397c091a4a11655c537e0d8a9b5e2efcf43f39c8773",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/tokenizer.json",
+      "in_archive": true
+    },
+    {
+      "name": "tokenizer_config.json",
+      "bytes": 1921,
+      "sha256": "651a100b5fcf6a65cae721abee071d56405ea04209bf65522be241241f9fdba1",
+      "original_url": "https://huggingface.co/sentence-transformers/sentence-t5-xl/resolve/92e07434e0b0e93b36dd780c47c9b48d32fbcdaa/tokenizer_config.json",
+      "in_archive": true
+    }
+  ]
+}

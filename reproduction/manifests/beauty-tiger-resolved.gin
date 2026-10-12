@@ -1,0 +1,51 @@
+import genrec.data.amazon
+import genrec.models.tiger as genrec2
+
+# Macros:
+# ==============================================================================
+MODEL_HUB_QWEN3_1_7B = '/root/workspace/models_hub/Qwen3-1.7B'
+MODEL_HUB_QWEN3_4B = '/root/workspace/models_hub/Qwen3-4B'
+MODEL_HUB_QWEN3_EMBEDDING_8B = '/root/workspace/models_hub/Qwen3-Embedding-8B'
+MODEL_HUB_SENTENCE_T5_BASE = '/root/workspace/models_hub/sentence-t5-base'
+MODEL_HUB_SENTENCE_T5_XL = '/root/genrec-reproduction/models_hub/sentence-t5-xl'
+
+# Parameters for AmazonSeqDataset:
+# ==============================================================================
+AmazonSeqDataset.add_disambiguation = False
+AmazonSeqDataset.encoder_model_name = %MODEL_HUB_SENTENCE_T5_XL
+AmazonSeqDataset.rqvae_codebook_size = 256
+AmazonSeqDataset.rqvae_embed_dim = 32
+AmazonSeqDataset.rqvae_hidden_dims = [512, 256, 128, 64]
+AmazonSeqDataset.rqvae_input_dim = 768
+AmazonSeqDataset.rqvae_n_layers = 3
+AmazonSeqDataset.split = 'beauty'
+
+# Parameters for train:
+# ==============================================================================
+train.batch_size = 256
+train.beam_size = 30
+train.codebook_size = 256
+train.d_ff = 1024
+train.d_kv = 64
+train.d_model = 128
+train.dataset = @AmazonSeqDataset
+train.dataset_folder = 'dataset/amazon'
+train.dropout_rate = 0.1
+train.early_stop_patience = 10
+train.epochs = 200
+train.eval_test_every_epoch = 2
+train.feed_forward_proj = 'relu'
+train.infer_batch_size = 96
+train.learning_rate = 0.0001
+train.max_seq_len = 50
+train.num_decoder_layers = 4
+train.num_heads = 6
+train.num_layers = 4
+train.pretrained_rqvae_path = \
+    './out/tiger/amazon/beauty/rqvae/checkpoint_epoch_4999.pt'
+train.save_dir_root = 'out/tiger/amazon/beauty/'
+train.sem_id_dim = 3
+train.wandb_log_interval = 10
+train.wandb_logging = False
+train.wandb_project = 'tiger_beauty_training'
+train.weight_decay = 0.0
