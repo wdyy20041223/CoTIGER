@@ -1,8 +1,8 @@
 """
 TIGER: Recommender Systems with Generative Retrieval.
 
-Uses HuggingFace T5ForConditionalGeneration directly (matching the reference
-implementation). Items are represented as flat offset-encoded codebook tokens:
+Uses the local HuggingFace-compatible T5 implementation, with optional SDPA.
+Items are represented as flat offset-encoded codebook tokens:
     token = code + codebook_idx * codebook_size + 1
 (0 is reserved for padding.)
 
@@ -32,6 +32,8 @@ class Tiger(nn.Module):
             eos_token_id=config.get('eos_token_id', 0),
             decoder_start_token_id=config.get('pad_token_id', 0),
             feed_forward_proj=config.get('feed_forward_proj', 'relu'),
+            use_sdpa=config.get('use_sdpa', False),
+            first_beam_only=config.get('first_beam_only', True),
         )
         self.model = T5ForConditionalGeneration(t5config)
         self.sem_id_dim = config.get('sem_id_dim', 3)

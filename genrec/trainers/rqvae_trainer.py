@@ -7,12 +7,13 @@ import numpy as np
 import time
 import torch
 import wandb
+from collections import deque
 
 from genrec.data.p5_amazon import P5AmazonReviewsItemDataset
 from genrec.data.utils import cycle
 from genrec.models.rqvae import RqVae, QuantizeForwardMode
 from genrec.modules.utils import parse_config, setup_logger
-from genrec.trainers.trainer_utils import setup_accelerator, setup_wandb
+from genrec.trainers.trainer_utils import setup_accelerator, setup_wandb, set_seed
 import torch.distributed as dist
 from torch.optim import AdamW
 from torch.utils.data import BatchSampler
@@ -30,21 +31,56 @@ def compute_collision_rate(model, dataloader, device):
     collision_rate = (total_items - unique_semantic_ids) / total_items
     """
     model.eval()
-    indices_set = set()
-    num_sample = 0
+    all_indices = []
 
     for batch in dataloader:
-        data = batch.to(device)
+        data = batch.to(device, non_blocking=True)
         output = model.get_semantic_ids(data, gumbel_t=0.001)
         indices = output.sem_ids.cpu().numpy()  # [batch, n_layers]
 
-        for idx in indices:
-            code = "-".join([str(int(i)) for i in idx])
-            indices_set.add(code)
-        num_sample += len(data)
+        all_indices.append(indices)
 
-    collision_rate = (num_sample - len(indices_set)) / num_sample
-    return collision_rate, num_sample, len(indices_set)
+    indices = np.concatenate(all_indices, axis=0)
+    num_sample = len(indices)
+    num_unique = len(np.unique(indices, axis=0))
+    collision_rate = (num_sample - num_unique) / num_sample
+    return collision_rate, num_sample, num_unique
+
+
+def collate_embeddings(batch):
+    """Picklable fallback for datasets returning Python lists."""
+    return torch.as_tensor(np.asarray(batch), dtype=torch.float32)
+
+
+def embedding_loader(item_dataset, batch_size, num_workers, shuffle):
+    # Avoid ndarray -> list -> tensor conversions for every item every epoch.
+    if isinstance(getattr(item_dataset, "embeddings", None), np.ndarray):
+        item_dataset = torch.from_numpy(
+            np.ascontiguousarray(item_dataset.embeddings, dtype=np.float32)
+        )
+        collate_fn = None
+    else:
+        collate_fn = collate_embeddings
+    worker_options = {}
+    if num_workers > 0:
+        worker_options = {"prefetch_factor": 2, "persistent_workers": True}
+    return DataLoader(
+        item_dataset, batch_size=batch_size, shuffle=shuffle,
+        collate_fn=collate_fn, num_workers=num_workers,
+        pin_memory=torch.cuda.is_available(), **worker_options,
+    )
+
+
+@torch.no_grad()
+def evaluate_losses(model, dataloader, device):
+    totals = torch.zeros(3, device=device)
+    for batch in dataloader:
+        output = model(batch.to(device, non_blocking=True), gumbel_t=0.2, compute_stats=False)
+        totals += torch.stack((output.loss, output.reconstruction_loss, output.rqvae_loss))
+    averages = (totals / len(dataloader)).cpu().numpy()
+    if not np.isfinite(averages).all():
+        raise FloatingPointError("RQ-VAE evaluation loss is not finite; retry with train.amp=False.")
+    return averages
 
 
 @gin.configurable
@@ -83,6 +119,10 @@ def train(
     vae_sim_vq=False,
     vae_n_layers=3,
     encoder_model_name="./models_hub/sentence-t5-xl",
+    num_workers=0,
+    seed=42,
+    compile_forward=False,
+    kmeans_init_samples=20000,
 ):
     """
     train rqvae
@@ -94,6 +134,10 @@ def train(
         raise ValueError("Cannot specify both 'epochs' and 'iterations'")
 
     use_epochs = epochs is not None
+    set_seed(seed)
+    if amp and mixed_precision_type == "bf16" and torch.cuda.is_available():
+        if not torch.cuda.is_bf16_supported(including_emulation=False):
+            raise ValueError("This GPU does not support native BF16; use mixed_precision_type='fp16'.")
 
     # setup accelerator
     accelerator = setup_accelerator(
@@ -106,24 +150,11 @@ def train(
 
     train_dataset = dataset(root=dataset_folder, train_test_split="train", encoder_model_name=encoder_model_name)
 
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=batch_size,
-        collate_fn=lambda batch: torch.tensor(batch, dtype=torch.float32),
-        shuffle=True,
-        num_workers=16,
-        pin_memory=True,
-        prefetch_factor=10,
-        persistent_workers=True)
+    train_dataloader = embedding_loader(train_dataset, batch_size, num_workers, shuffle=True)
 
     if do_eval:
         eval_dataset = dataset(root=dataset_folder, train_test_split="eval", encoder_model_name=encoder_model_name)
-        eval_dataloader = DataLoader(
-            eval_dataset,
-            batch_size=batch_size, collate_fn=lambda batch: torch.tensor(batch, dtype=torch.float32),
-            num_workers=16,
-            pin_memory=True,
-            prefetch_factor=10,
-            persistent_workers=True)
+        eval_dataloader = embedding_loader(eval_dataset, batch_size, num_workers, shuffle=False)
 
     # Calculate total steps
     steps_per_epoch = len(train_dataloader)
@@ -154,6 +185,10 @@ def train(
         n_cat_features=vae_n_cat_feats,
         commitment_weight=commitment_weight
     )
+    if compile_forward:
+        # Opt in after moving compilation out of the model definition. Small
+        # smoke runs and Windows do not need Triton or an expensive first compile.
+        model.forward = torch.compile(model.forward, mode="reduce-overhead")
 
     optimizer = AdamW(
         params=model.parameters(),
@@ -191,10 +226,12 @@ def train(
             start_epoch = start_step // steps_per_epoch
 
     model, optimizer, scheduler = accelerator.prepare(model, optimizer, scheduler)
+    if pretrained_rqvae_path is not None and accelerator.scaler is not None and "scaler" in state:
+        accelerator.scaler.load_state_dict(state["scaler"])
 
     # Training loop
     global_step = start_step
-    losses = [[], [], []]
+    losses = deque(maxlen=1000)
     print_loss, print_rec_loss, print_vae_loss = 0, 0, 0
 
     if use_epochs:
@@ -203,7 +240,8 @@ def train(
             total=total_steps,
             initial=start_step,
             desc="Training",
-            disable=not accelerator.is_main_process
+            disable=not accelerator.is_main_process,
+            mininterval=1.0,
         ) as pbar:
             for epoch in range(start_epoch, epochs):
                 model.train()
@@ -215,47 +253,43 @@ def train(
                     if global_step == 0 and use_kmeans_init and batch_idx == 0:
                         buf = [data]
                         seen = data.size(0)
-                        want = 20000
+                        want = kmeans_init_samples
                         for extra_data in train_dataloader:
                             buf.append(extra_data)
                             seen += extra_data.size(0)
                             if seen >= want:
                                 break
-                        big_batch = torch.cat(buf, dim=0).to(device)
-                        model(big_batch, t)
+                        big_batch = torch.cat(buf, dim=0).to(device, non_blocking=True)
+                        with torch.no_grad():
+                            accelerator.unwrap_model(model).get_semantic_ids(big_batch, t)
 
-                    optimizer.zero_grad()
-                    data = data.to(device)
+                    optimizer.zero_grad(set_to_none=True)
+                    data = data.to(device, non_blocking=True)
+                    log_stats = wandb_logging and (global_step + 1) % wandb_log_interval == 0
 
                     with accelerator.autocast():
-                        model_output = model(data, gumbel_t=t)
+                        model_output = model(data, gumbel_t=t, compute_stats=log_stats)
                         loss = model_output.loss
 
                     accelerator.backward(loss)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    accelerator.clip_grad_norm_(model.parameters(), 1.0)
                     optimizer.step()
                     scheduler.step()
 
                     # Track losses
-                    losses[0].append(loss.cpu().item())
-                    losses[1].append(model_output.reconstruction_loss.cpu().item())
-                    losses[2].append(model_output.rqvae_loss.cpu().item())
-                    losses[0] = losses[0][-1000:]
-                    losses[1] = losses[1][-1000:]
-                    losses[2] = losses[2][-1000:]
+                    losses.append(torch.stack((loss, model_output.reconstruction_loss, model_output.rqvae_loss)).detach())
 
                     if global_step % 100 == 0:
-                        print_loss = np.mean(losses[0])
-                        print_rec_loss = np.mean(losses[1])
-                        print_vae_loss = np.mean(losses[2])
-
-                    pbar.set_postfix({
-                        'epoch': f'{epoch+1}/{epochs}',
-                        'loss': f'{print_loss:.4f}',
-                        'rec': f'{print_rec_loss:.4f}',
-                        'vq': f'{print_vae_loss:.4f}',
-                        'lr': f'{scheduler.get_last_lr()[0]:.2e}'
-                    })
+                        print_loss, print_rec_loss, print_vae_loss = torch.stack(list(losses)).mean(dim=0).tolist()
+                        if not np.isfinite([print_loss, print_rec_loss, print_vae_loss]).all():
+                            raise FloatingPointError("RQ-VAE loss is not finite; retry with train.amp=False.")
+                        pbar.set_postfix({
+                            'epoch': f'{epoch+1}/{epochs}',
+                            'loss': f'{print_loss:.4f}',
+                            'rec': f'{print_rec_loss:.4f}',
+                            'vq': f'{print_vae_loss:.4f}',
+                            'lr': f'{scheduler.get_last_lr()[0]:.2e}'
+                        }, refresh=False)
 
                     # Wandb logging
                     if accelerator.is_main_process and wandb_logging and (global_step + 1) % wandb_log_interval == 0:
@@ -280,20 +314,11 @@ def train(
                 # End of epoch: eval and save
                 if do_eval and ((epoch + 1) % eval_every == 0 or epoch + 1 == epochs):
                     model.eval()
-                    eval_losses = [[], [], []]
-                    for batch in eval_dataloader:
-                        data = batch.to(device)
-                        with torch.no_grad():
-                            eval_model_output = model(data, gumbel_t=0.2)
-                        eval_losses[0].append(eval_model_output.loss.cpu().item())
-                        eval_losses[1].append(eval_model_output.reconstruction_loss.cpu().item())
-                        eval_losses[2].append(eval_model_output.rqvae_loss.cpu().item())
-
-                    eval_losses = np.array(eval_losses).mean(axis=-1)
+                    eval_losses = evaluate_losses(model, eval_dataloader, device)
 
                     # Compute collision rate on training data
                     collision_rate, total_items, unique_ids = compute_collision_rate(
-                        model, train_dataloader, device
+                        accelerator.unwrap_model(model), train_dataloader, device
                     )
 
                     if accelerator.is_main_process:
@@ -311,11 +336,13 @@ def train(
                     if (epoch + 1) % save_model_every == 0 or epoch + 1 == epochs:
                         state = {
                             "epoch": epoch,
-                            "model": model.state_dict(),
-                            "model_config": model.config,
+                            "model": accelerator.unwrap_model(model).state_dict(),
+                            "model_config": {k: v for k, v in accelerator.unwrap_model(model).config.items() if k not in {"self", "__class__"}},
                             "optimizer": optimizer.state_dict(),
                             "scheduler": scheduler.state_dict()
                         }
+                        if accelerator.scaler is not None:
+                            state["scaler"] = accelerator.scaler.state_dict()
                         if not os.path.exists(save_dir_root):
                             os.makedirs(save_dir_root)
                         torch.save(state, save_dir_root + f"/checkpoint_epoch_{epoch}.pt")
@@ -327,7 +354,8 @@ def train(
         with tqdm(
             initial=start_step,
             total=total_steps,
-            disable=not accelerator.is_main_process
+            disable=not accelerator.is_main_process,
+            mininterval=1.0,
         ) as pbar:
             for iter in range(start_step, total_steps):
                 model.train()
@@ -336,40 +364,35 @@ def train(
                 if iter == 0 and use_kmeans_init:
                     buf = []
                     seen = 0
-                    want = 20000
+                    want = kmeans_init_samples
                     while seen < want:
-                        data = next(train_dataloader_iter).to(device)
+                        data = next(train_dataloader_iter).to(device, non_blocking=True)
                         buf.append(data)
                         seen += data.size(0)
                     big_batch = torch.cat(buf, dim=0)
-                    model(big_batch, t)
+                    with torch.no_grad():
+                        accelerator.unwrap_model(model).get_semantic_ids(big_batch, t)
 
-                optimizer.zero_grad()
-                data = next(train_dataloader_iter).to(device)
+                optimizer.zero_grad(set_to_none=True)
+                data = next(train_dataloader_iter).to(device, non_blocking=True)
+                log_stats = wandb_logging and (iter + 1) % wandb_log_interval == 0
 
                 with accelerator.autocast():
-                    model_output = model(data, gumbel_t=t)
+                    model_output = model(data, gumbel_t=t, compute_stats=log_stats)
                     loss = model_output.loss
 
                 accelerator.backward(loss)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                accelerator.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 scheduler.step()
 
-                losses[0].append(loss.cpu().item())
-                losses[1].append(model_output.reconstruction_loss.cpu().item())
-                losses[2].append(model_output.rqvae_loss.cpu().item())
-                losses[0] = losses[0][-1000:]
-                losses[1] = losses[1][-1000:]
-                losses[2] = losses[2][-1000:]
+                losses.append(torch.stack((loss, model_output.reconstruction_loss, model_output.rqvae_loss)).detach())
                 if iter % 100 == 0:
-                    print_loss = np.mean(losses[0])
-                    print_rec_loss = np.mean(losses[1])
-                    print_vae_loss = np.mean(losses[2])
+                    print_loss, print_rec_loss, print_vae_loss = torch.stack(list(losses)).mean(dim=0).tolist()
+                    if not np.isfinite([print_loss, print_rec_loss, print_vae_loss]).all():
+                        raise FloatingPointError("RQ-VAE loss is not finite; retry with train.amp=False.")
 
                 pbar.set_description(f'loss: {print_loss:.4f}, rl: {print_rec_loss:.4f}, vl: {print_vae_loss:.4f}')
-
-                accelerator.wait_for_everyone()
 
                 id_diversity_log = {}
                 if accelerator.is_main_process and wandb_logging:
@@ -389,23 +412,14 @@ def train(
 
                 if do_eval and ((iter + 1) % eval_every == 0 or iter + 1 == total_steps):
                     model.eval()
-                    eval_losses = [[], [], []]
-                    for batch in eval_dataloader:
-                        data = batch.to(device)
-                        with torch.no_grad():
-                            eval_model_output = model(data, gumbel_t=0.2)
-                        eval_losses[0].append(eval_model_output.loss.cpu().item())
-                        eval_losses[1].append(eval_model_output.reconstruction_loss.cpu().item())
-                        eval_losses[2].append(eval_model_output.rqvae_loss.cpu().item())
-
-                    eval_losses = np.array(eval_losses).mean(axis=-1)
+                    eval_losses = evaluate_losses(model, eval_dataloader, device)
                     id_diversity_log["eval_total_loss"] = eval_losses[0]
                     id_diversity_log["eval_reconstruction_loss"] = eval_losses[1]
                     id_diversity_log["eval_rqvae_loss"] = eval_losses[2]
 
                     # Compute collision rate on training data
                     collision_rate, total_items, unique_ids = compute_collision_rate(
-                        model, train_dataloader, device
+                        accelerator.unwrap_model(model), train_dataloader, device
                     )
                     id_diversity_log["collision_rate"] = collision_rate
                     id_diversity_log["unique_semantic_ids"] = unique_ids
@@ -416,11 +430,13 @@ def train(
                     if (iter + 1) % save_model_every == 0 or iter + 1 == total_steps:
                         state = {
                             "iter": iter,
-                            "model": model.state_dict(),
-                            "model_config": model.config,
+                            "model": accelerator.unwrap_model(model).state_dict(),
+                            "model_config": {k: v for k, v in accelerator.unwrap_model(model).config.items() if k not in {"self", "__class__"}},
                             "optimizer": optimizer.state_dict(),
                             "scheduler": scheduler.state_dict()
                         }
+                        if accelerator.scaler is not None:
+                            state["scaler"] = accelerator.scaler.state_dict()
 
                         if not os.path.exists(save_dir_root):
                             os.makedirs(save_dir_root)

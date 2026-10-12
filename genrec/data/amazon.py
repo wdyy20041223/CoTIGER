@@ -3,6 +3,7 @@ Amazon Reviews Dataset for RQVAE training.
 Supports automatic download and processing of Amazon Review 2014 5-core data.
 """
 import gzip
+import copy
 import json
 import logging
 import os
@@ -340,6 +341,19 @@ class AmazonSeqDataset(Dataset):
         # Load user sequences and generate samples
         self._load_sequences()
         self._generate_samples()
+
+    def with_split(self, train_test_split: str):
+        """Build another split while reusing item IDs and user sequences.
+
+        A shallow copy is sufficient: _generate_samples replaces samples, and
+        the shared embeddings, semantic IDs and histories are read-only.
+        """
+        if train_test_split not in {"train", "valid", "test"}:
+            raise ValueError(f"Unknown sequence split: {train_test_split}")
+        result = copy.copy(self)
+        result.train_test_split = train_test_split
+        result._generate_samples()
+        return result
 
     def _add_disambiguation_suffix(self, sem_ids_list: List[List[int]]) -> List[List[int]]:
         """Add 4th code to disambiguate items with identical semantic IDs.

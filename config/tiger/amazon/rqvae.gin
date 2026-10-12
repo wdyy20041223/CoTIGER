@@ -6,11 +6,15 @@ import genrec.data.amazon
 import genrec.models.rqvae
 
 # Training settings (epoch-based with warmup)
-train.epochs = 5000
+train.epochs = 2000
 train.warmup_epochs = 50
 train.learning_rate = 0.001
 train.weight_decay = 0.0001
 train.batch_size = 1024
+train.amp = True
+train.mixed_precision_type = 'fp16'
+# Embeddings are already in RAM; avoid 16 worker processes for small tensor batches.
+train.num_workers = 0
 
 # Model architecture
 train.vae_input_dim = 768
@@ -34,8 +38,8 @@ train.encoder_model_name = %MODEL_HUB_SENTENCE_T5_XL
 AmazonItemDataset.split = "{split}"
 
 # Checkpointing
-train.save_model_every = 50
-train.eval_every = 50
+train.save_model_every = 200
+train.eval_every = 200
 train.save_dir_root = "out/tiger/amazon/{split}/rqvae"
 
 # Logging

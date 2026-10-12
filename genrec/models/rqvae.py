@@ -98,6 +98,8 @@ def _sinkhorn_knopp(
     returns: (B, K) optimal transport matrix P, satisfies row and column constraints
     """
     K = torch.exp(-cost / eps)
+    row_marginals = row_marginals.to(dtype=K.dtype)
+    col_marginals = col_marginals.to(dtype=K.dtype)
 
     u = torch.ones_like(row_marginals)
     v = torch.ones_like(col_marginals)
@@ -393,16 +395,20 @@ class RqVae(nn.Module):
         """
         res = self.encode(x)
 
-        quantize_loss = 0
-        embs, residuals, sem_ids = [], [], []
-        for layer in self.layers:
-            residuals.append(res)
-            quantized = layer(res, temperature=gumbel_t)
-            quantize_loss = quantize_loss + quantized.loss
-            emb, id = quantized.embeddings, quantized.ids
-            res = res - emb
-            sem_ids.append(id)
-            embs.append(emb)
+        # Encoder/decoder GEMMs can use AMP, but code assignments and Sinkhorn
+        # are sensitive to precision. Preserve fp32 distances and fp64 transport.
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            res = res.float()
+            quantize_loss = 0
+            embs, residuals, sem_ids = [], [], []
+            for layer in self.layers:
+                residuals.append(res)
+                quantized = layer(res, temperature=gumbel_t)
+                quantize_loss = quantize_loss + quantized.loss
+                emb, id = quantized.embeddings, quantized.ids
+                res = res - emb
+                sem_ids.append(id)
+                embs.append(emb)
 
         return RqVaeOutput(
             embeddings=rearrange(embs, "b h d -> h d b"),
@@ -411,8 +417,7 @@ class RqVae(nn.Module):
             quantize_loss=quantize_loss
         )
 
-    @torch.compile(mode="reduce-overhead")
-    def forward(self, batch: Tensor, gumbel_t: float) -> RqVaeComputedLosses:
+    def forward(self, batch: Tensor, gumbel_t: float, compute_stats: bool = True) -> RqVaeComputedLosses:
         """
         Forward pass.
 
@@ -440,10 +445,12 @@ class RqVae(nn.Module):
         with torch.no_grad():
             # Compute debug ID statistics
             embs_norm = embs.norm(dim=1)
-            p_unique_ids = (~torch.triu(
-                (rearrange(quantized.sem_ids, "b d -> b 1 d") \
-                == rearrange(quantized.sem_ids, "b d -> 1 b d")).all(axis=-1), diagonal=1)
-            ).all(axis=1).sum() / quantized.sem_ids.shape[0]
+            # Exact same statistic without the quadratic (B, B, n_layers)
+            # comparison tensor. Trainers request it only on logging steps.
+            p_unique_ids = embs.new_zeros(())
+            if compute_stats:
+                n_unique = torch.unique(quantized.sem_ids, dim=0).size(0)
+                p_unique_ids = embs.new_tensor(n_unique / quantized.sem_ids.size(0))
 
         return RqVaeComputedLosses(
             loss=loss,

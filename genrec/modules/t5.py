@@ -39,6 +39,8 @@ class T5Config:
     decoder_start_token_id: Optional[int] = None
     is_decoder: bool = False
     tie_word_embeddings: bool = True
+    use_sdpa: bool = False
+    first_beam_only: bool = True
 
     # derived — filled in __post_init__
     dense_act_fn: str = field(init=False)
@@ -184,6 +186,7 @@ class T5Attention(nn.Module):
         self.key_value_proj_dim = config.d_kv
         self.n_heads = config.num_heads
         self.dropout = config.dropout_rate
+        self.use_sdpa = config.use_sdpa
         self.inner_dim = self.n_heads * self.key_value_proj_dim
 
         self.q = nn.Linear(self.d_model, self.inner_dim, bias=False)
@@ -284,34 +287,55 @@ class T5Attention(nn.Module):
         # optionally save cache
         new_key_value = (key_states, value_states) if use_cache else None
 
-        # Attention scores — T5 does NOT scale by 1/sqrt(d_k)!
-        scores = torch.matmul(query_states, key_states.transpose(3, 2))
-
         # Position bias
         if position_bias is None:
             key_length = key_states.shape[2]
             if not self.has_relative_attention_bias:
                 position_bias = torch.zeros(
                     (1, self.n_heads, seq_length, key_length),
-                    device=scores.device, dtype=scores.dtype,
+                    device=query_states.device, dtype=query_states.dtype,
                 )
             else:
                 # for cached decoding, compute bias for full length
                 real_query_length = key_length if not is_cross_attention else seq_length
-                position_bias = self.compute_bias(real_query_length, key_length, device=scores.device)
+                position_bias = self.compute_bias(real_query_length, key_length, device=query_states.device)
                 # slice to current query length (for cached decoding)
                 position_bias = position_bias[:, :, -seq_length:, :]
 
             if mask is not None:
                 position_bias = position_bias + mask[:, :, :seq_length, :key_states.shape[2]]
 
-        scores += position_bias
-
-        # Softmax in fp32
-        attn_weights = F.softmax(scores.float(), dim=-1).type_as(scores)
-        attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
-
-        attn_output = torch.matmul(attn_weights, value_states)
+        if self.use_sdpa:
+            # T5 uses unscaled QK scores. A matching bias dtype permits fused
+            # SDPA kernels. Clamp padding values before fp16 conversion so
+            # fully masked left-padding rows do not turn into all -inf.
+            attention_bias = position_bias
+            if attention_bias.dtype != query_states.dtype:
+                attention_bias = attention_bias.clamp_min(torch.finfo(query_states.dtype).min).to(query_states.dtype)
+            # Relative-bias embedding permutes leave stride(-1)=num_heads.
+            # Fused CUDA kernels require stride(-1)=1 for the additive mask.
+            attention_bias = attention_bias.contiguous()
+            attn_output = F.scaled_dot_product_attention(
+                query_states, key_states, value_states,
+                attn_mask=attention_bias,
+                dropout_p=self.dropout if self.training else 0.0,
+                scale=1.0,
+            )
+        else:
+            # Accumulate fp16 attention scores in fp32 to avoid overflow and
+            # NaNs on fully masked left-padding rows. FP32/BF16 retain the
+            # original implementation.
+            if query_states.dtype == torch.float16:
+                with torch.autocast(device_type=query_states.device.type, enabled=False):
+                    scores = torch.matmul(query_states.float(), key_states.float().transpose(3, 2))
+                    scores = scores + position_bias.float()
+                    attn_weights = F.softmax(scores, dim=-1).to(value_states.dtype)
+            else:
+                scores = torch.matmul(query_states, key_states.transpose(3, 2))
+                scores += position_bias
+                attn_weights = F.softmax(scores.float(), dim=-1).type_as(scores)
+            attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
+            attn_output = torch.matmul(attn_weights, value_states)
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, -1, self.inner_dim)
         attn_output = self.o(attn_output)
 
@@ -802,6 +826,7 @@ class T5ForConditionalGeneration(nn.Module):
     ):
         device = encoder_outputs[0].device
         vocab_size = self.config.vocab_size
+        original_attention_mask = attention_mask
 
         # Expand encoder outputs for beam search: (B, ...) → (B*num_beams, ...)
         enc_hidden = encoder_outputs[0]
@@ -825,21 +850,37 @@ class T5ForConditionalGeneration(nn.Module):
         past_key_values = None
 
         for step in range(max_length - 1):
+            first_only = step == 0 and self.config.first_beam_only and not self.training
+            # All initial beams have the same start token and encoder context.
+            # Decode it once per user, then expand its KV cache. Dropout-enabled
+            # training keeps the reference path because beams can then differ.
+            step_encoder = encoder_outputs if first_only else (enc_hidden,)
+            step_mask = original_attention_mask if first_only else attention_mask
+            step_ids = decoder_input_ids.view(batch_size, num_beams, -1)[:, 0] if first_only else (
+                decoder_input_ids if past_key_values is None else decoder_input_ids[:, -1:]
+            )
             out = self.forward(
-                encoder_outputs=(enc_hidden,),
-                attention_mask=attention_mask,
-                decoder_input_ids=decoder_input_ids if past_key_values is None else decoder_input_ids[:, -1:],
+                encoder_outputs=step_encoder,
+                attention_mask=step_mask,
+                decoder_input_ids=step_ids,
                 use_cache=True,
                 past_key_values=past_key_values,
             )
             past_key_values = out.past_key_values
+            if first_only:
+                past_key_values = tuple(
+                    tuple(None if pair is None else tuple(t.repeat_interleave(num_beams, dim=0) for t in pair)
+                          for pair in layer_cache)
+                    for layer_cache in past_key_values
+                )
 
             # next token logits: (B*num_beams, vocab_size)
             next_token_logits = out.logits[:, -1, :]
-            next_token_scores = F.log_softmax(next_token_logits, dim=-1)
+            # Beam scores must not accumulate rounding/overflow in fp16.
+            next_token_scores = F.log_softmax(next_token_logits.float(), dim=-1)
 
             # (B, num_beams * vocab_size)
-            next_scores = next_token_scores.view(batch_size, num_beams, -1)
+            next_scores = next_token_scores.unsqueeze(1) if first_only else next_token_scores.view(batch_size, num_beams, -1)
             next_scores = next_scores + beam_scores.unsqueeze(-1)
             next_scores = next_scores.view(batch_size, num_beams * vocab_size)
 
