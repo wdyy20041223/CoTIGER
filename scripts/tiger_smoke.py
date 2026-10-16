@@ -87,7 +87,7 @@ def run_stage(module, config, overrides, output):
     return time.perf_counter() - started
 
 
-def micro_timing(output):
+def micro_timing(report_path):
     # Two input histories, one warmup and three measurements per execution path.
     from genrec.data.schemas import SeqData
     from genrec.models.tiger import Tiger
@@ -148,7 +148,7 @@ def micro_timing(output):
         timings[name]['beam15_generation_median_ms'] = float(np.median(generation_ms))
     timings['device'] = torch.cuda.get_device_name(0)
     timings['scope'] = 'Tiny timing only; not a V100 throughput estimate or accuracy comparison.'
-    (output / 'micro_timing.json').write_text(json.dumps(timings, indent=2), encoding='utf-8')
+    report_path.write_text(json.dumps(timings, indent=2), encoding='utf-8')
     return timings
 
 
@@ -160,6 +160,14 @@ def main():
     output = (ROOT / (args.output or f'out/tiger_speed_smoke/run_{time.strftime("%Y%m%d_%H%M%S")}')).resolve()
     # Refuse paths outside the checkout and existing runs; never overwrite artifacts.
     output.relative_to(ROOT)
+    document_dir = ROOT / 'docs/generated'
+    report_prefix = f'tiger-smoke-{output.name.removeprefix("run_")}'
+    report_path = document_dir / f'{report_prefix}-report.json'
+    timing_path = document_dir / f'{report_prefix}-micro-timing.json'
+    for path in (report_path, timing_path):
+        if path.exists():
+            raise FileExistsError(f'Document already exists: {path}')
+    document_dir.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=False)
     data, fixture = make_fixture(output)
     rq_dir = output / 'rqvae'
@@ -189,7 +197,7 @@ def main():
     assert result['optimizer_updates'] > 0, 'All TIGER steps were skipped by GradScaler.'
     tiger_weights = torch.load(tiger_dir / 'best_model.pt', map_location='cpu', weights_only=True)
     assert all(torch.isfinite(value).all() for value in tiger_weights.values())
-    timing = None if args.skip_timing else micro_timing(output)
+    timing = None if args.skip_timing else micro_timing(timing_path)
     report = {'status': 'passed', 'fixture': {k: v for k, v in fixture.items() if k != 'catalog_asins_in_order'},
               'rqvae_optimizer_steps_requested': 2, 'tiger_optimizer_steps_requested': 2,
               'rqvae_seconds_including_startup': rq_seconds, 'tiger_seconds_including_startup': tiger_seconds,
@@ -202,8 +210,8 @@ def main():
                     'genrec/models/rqvae.py', 'genrec/models/tiger.py', 'genrec/modules/t5.py',
                     'genrec/data/amazon.py', 'config/tiger/amazon/rqvae.gin', 'config/tiger/amazon/tiger.gin']
     report['source_sha256'] = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in source_files}
-    (output / 'report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
-    print(json.dumps({'status': report['status'], 'report': str(output / 'report.json'),
+    report_path.write_text(json.dumps(report, indent=2), encoding='utf-8')
+    print(json.dumps({'status': report['status'], 'report': str(report_path),
                       'rqvae_seconds': rq_seconds, 'tiger_seconds': tiger_seconds, 'timing': timing}, indent=2))
 
 

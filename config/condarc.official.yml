@@ -1,0 +1,13 @@
+# The defaults multichannel overrides inherited mirror URLs in default_channels.
+channels:
+  - defaults
+custom_multichannels:
+  defaults:
+    - https://repo.anaconda.com/pkgs/main
+    - https://repo.anaconda.com/pkgs/r
+    - https://repo.anaconda.com/pkgs/msys2
+channel_alias: https://conda.anaconda.org
+custom_channels:
+  conda-forge: https://conda.anaconda.org
+  pytorch: https://conda.anaconda.org
+show_channel_urls: true

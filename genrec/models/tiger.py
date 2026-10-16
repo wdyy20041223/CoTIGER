@@ -37,6 +37,7 @@ class Tiger(nn.Module):
         )
         self.model = T5ForConditionalGeneration(t5config)
         self.sem_id_dim = config.get('sem_id_dim', 3)
+        self.sid_trie = None
 
     @property
     def num_parameters(self):
@@ -52,11 +53,18 @@ class Tiger(nn.Module):
         )
         return outputs.loss, outputs.logits
 
-    def generate(self, input_ids, attention_mask=None, num_beams=20):
+    def set_sid_trie(self, trie):
+        """Enable catalog-constrained inference; pass None to restore free search."""
+        self.sid_trie = trie
+        return self
+
+    def generate(self, input_ids, attention_mask=None, num_beams=15, beam_sizes=None):
         return self.model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
             max_length=self.sem_id_dim + 1,  # +1 for decoder_start_token
             num_beams=num_beams,
-            num_return_sequences=num_beams,
+            num_return_sequences=beam_sizes[-1] if beam_sizes is not None else num_beams,
+            sid_trie=self.sid_trie,
+            beam_sizes=beam_sizes,
         )

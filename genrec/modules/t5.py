@@ -779,30 +779,52 @@ class T5ForConditionalGeneration(nn.Module):
         max_length: int = 20,
         num_beams: int = 1,
         num_return_sequences: int = 1,
+        sid_trie=None,
+        beam_sizes=None,
     ) -> torch.LongTensor:
         """Simple beam search generation (no sampling)."""
         batch_size = input_ids.shape[0]
+        if beam_sizes is not None:
+            beam_sizes = tuple(beam_sizes)
+            if len(beam_sizes) != max_length - 1 or any(not isinstance(k, int) or k < 1 for k in beam_sizes):
+                raise ValueError("beam_sizes must contain one positive integer per generated token")
+            if not 1 <= num_return_sequences <= beam_sizes[-1]:
+                raise ValueError("num_return_sequences exceeds the final Beam width")
+            if sid_trie is not None:
+                raise ValueError("Per-depth Beam sizes require Trie to be disabled")
+            num_beams = beam_sizes[0]
+        trie_children = None
+        if sid_trie is not None:
+            if sid_trie.sid_length != max_length - 1 or sid_trie.vocab_size != self.config.vocab_size:
+                raise ValueError("SID Trie length/vocabulary must match the decoder")
+            # The existing fixed-width search keeps K real paths at every step.
+            if num_beams > sid_trie.prefix_counts[0]:
+                raise ValueError(f"Trie has only {sid_trie.prefix_counts[0]} first-level prefixes; reduce num_beams")
+            trie_children = sid_trie.children_on(input_ids.device)
 
         # Encode once
         encoder_outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
 
-        if num_beams == 1:
+        if num_beams == 1 and beam_sizes is None:
             return self._greedy_generate(
                 encoder_outputs, attention_mask, batch_size, max_length,
+                trie_children,
             )
         else:
             return self._beam_search(
                 encoder_outputs, attention_mask, batch_size,
                 max_length, num_beams, num_return_sequences,
+                trie_children, beam_sizes,
             )
 
-    def _greedy_generate(self, encoder_outputs, attention_mask, batch_size, max_length):
+    def _greedy_generate(self, encoder_outputs, attention_mask, batch_size, max_length, trie_children=None):
         device = encoder_outputs[0].device
         decoder_input_ids = torch.full(
             (batch_size, 1), self.config.decoder_start_token_id,
             dtype=torch.long, device=device,
         )
         past_key_values = None
+        trie_nodes = torch.zeros(batch_size, dtype=torch.long, device=device) if trie_children is not None else None
 
         for _ in range(max_length - 1):
             out = self.forward(
@@ -813,9 +835,14 @@ class T5ForConditionalGeneration(nn.Module):
                 past_key_values=past_key_values,
             )
             past_key_values = out.past_key_values
-            next_token = out.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+            logits = out.logits[:, -1, :]
+            if trie_children is not None:
+                logits = logits.masked_fill(trie_children[trie_nodes] < 0, -float("inf"))
+            next_token = logits.argmax(dim=-1, keepdim=True)
+            if trie_children is not None:
+                trie_nodes = trie_children[trie_nodes, next_token[:, 0]].long()
             decoder_input_ids = torch.cat([decoder_input_ids, next_token], dim=-1)
-            if (next_token == self.config.eos_token_id).all():
+            if trie_children is None and (next_token == self.config.eos_token_id).all():
                 break
 
         return decoder_input_ids
@@ -823,6 +850,7 @@ class T5ForConditionalGeneration(nn.Module):
     def _beam_search(
         self, encoder_outputs, attention_mask, batch_size,
         max_length, num_beams, num_return_sequences,
+        trie_children=None, beam_sizes=None,
     ):
         device = encoder_outputs[0].device
         vocab_size = self.config.vocab_size
@@ -837,6 +865,7 @@ class T5ForConditionalGeneration(nn.Module):
             attention_mask = attention_mask.unsqueeze(1).expand(-1, num_beams, -1).reshape(
                 batch_size * num_beams, -1
             )
+        encoded_beams = num_beams
 
         # Initialize beams
         decoder_input_ids = torch.full(
@@ -846,10 +875,22 @@ class T5ForConditionalGeneration(nn.Module):
         # beam_scores: (batch_size, num_beams)
         beam_scores = torch.zeros(batch_size, num_beams, device=device)
         beam_scores[:, 1:] = -1e9  # only first beam is active initially
+        if trie_children is not None:
+            beam_scores[:, 1:] = -float("inf")
+        trie_nodes = torch.zeros(batch_size * num_beams, dtype=torch.long, device=device) if trie_children is not None else None
 
         past_key_values = None
 
         for step in range(max_length - 1):
+            # Resize encoder context only when the previous Top-K changed width.
+            if num_beams != encoded_beams:
+                source_hidden = encoder_outputs[0]
+                enc_hidden = source_hidden.unsqueeze(1).expand(-1, num_beams, -1, -1).reshape(
+                    batch_size * num_beams, source_hidden.shape[1], source_hidden.shape[2])
+                if original_attention_mask is not None:
+                    attention_mask = original_attention_mask.unsqueeze(1).expand(-1, num_beams, -1).reshape(
+                        batch_size * num_beams, -1)
+                encoded_beams = num_beams
             first_only = step == 0 and self.config.first_beam_only and not self.training
             # All initial beams have the same start token and encoder context.
             # Decode it once per user, then expand its KV cache. Dropout-enabled
@@ -878,17 +919,39 @@ class T5ForConditionalGeneration(nn.Module):
             next_token_logits = out.logits[:, -1, :]
             # Beam scores must not accumulate rounding/overflow in fp16.
             next_token_scores = F.log_softmax(next_token_logits.float(), dim=-1)
+            candidate_token_scores = next_token_scores
+            if trie_children is not None:
+                nodes = trie_nodes.view(batch_size, num_beams)[:, 0] if first_only else trie_nodes
+                # Mask AFTER full-vocabulary log_softmax: legal path scores keep
+                # their original model probabilities, with no renormalization.
+                candidate_token_scores = next_token_scores.masked_fill(trie_children[nodes] < 0, -float("inf"))
 
             # (B, num_beams * vocab_size)
-            next_scores = next_token_scores.unsqueeze(1) if first_only else next_token_scores.view(batch_size, num_beams, -1)
+            next_scores = candidate_token_scores.unsqueeze(1) if first_only else candidate_token_scores.view(batch_size, num_beams, -1)
             next_scores = next_scores + beam_scores.unsqueeze(-1)
             next_scores = next_scores.view(batch_size, num_beams * vocab_size)
 
-            # top-k — take num_beams directly (already sorted, no EOS filtering needed)
-            top_scores, top_indices = torch.topk(next_scores, num_beams, dim=-1, largest=True, sorted=True)
+            # num_beams is the parent width; keep_beams is this step's output width.
+            keep_beams = beam_sizes[step] if beam_sizes is not None else num_beams
+            top_scores, top_indices = torch.topk(next_scores, keep_beams, dim=-1, largest=True, sorted=True)
 
             beam_indices = top_indices // vocab_size  # (B, num_beams) which beam
             token_indices = top_indices % vocab_size  # (B, num_beams) which token
+
+            # Optional passive recorder: receives the tensors used by the original
+            # search after its actual top-k decision, before parent state changes.
+            # The collector must only read/detach these tensors. No recorder is
+            # installed during ordinary training or generation.
+            recorder = getattr(self, "_beam_trace_recorder", None)
+            if recorder is not None:
+                recorder(
+                    depth=step + 1, batch_size=batch_size, num_beams=num_beams,
+                    first_beam_only=first_only, parent_tokens=decoder_input_ids,
+                    parent_scores=beam_scores, next_token_logits=next_token_logits,
+                    next_token_logprobs=next_token_scores,
+                    selected_flat_indices=top_indices,
+                    selected_cumulative_scores=top_scores,
+                )
 
             # Vectorized beam selection — no Python loops, no .item() calls
             beam_scores = top_scores  # (B, num_beams)
@@ -902,8 +965,11 @@ class T5ForConditionalGeneration(nn.Module):
                 decoder_input_ids[beam_idx],
                 token_indices.reshape(-1, 1),
             ], dim=-1)
+            if trie_children is not None:
+                trie_nodes = trie_children[trie_nodes[beam_idx], token_indices.reshape(-1)].long()
 
             past_key_values = self._reorder_cache(past_key_values, beam_idx)
+            num_beams = keep_beams
 
         # Select top num_return_sequences per batch
         # decoder_input_ids shape: (B*num_beams, seq_len)

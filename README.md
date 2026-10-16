@@ -1,328 +1,145 @@
-# GenRec
+# CoTIGER — Collaborative-Guided TIGER for Generative Retrieval
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
+基于 [GenRec](https://github.com/phonism/genrec) 的生成式推荐研究与工程项目。在冻结的 TIGER 上引入 **Train 商品转移统计**，引导 Semantic ID 前缀搜索，并通过稀疏查表和 KV Cache 优化降低推理开销。
 
-A Model Zoo for Generative Recommendation.
+项目围绕一个具体问题展开：**正确 SID 的早期前缀被 Beam 剪掉后，后续解码无法恢复目标商品。如何利用用户历史中的协同信号改善搜索，同时保留可核对的评分规则？**
 
-## Benchmark Results
+## 项目实现
 
-### Evaluation Protocol
+- **历史前缀校准**：从 Train 构建商品 SID 转移计数，按最近三件历史的时间衰减计算 Log-Lift，在 D2 引导搜索、D3 校准最终排序。
+- **公平对照**：比较原版 TIGER、纯 SID 转移推荐器、CoTIGER；同时保留 Beam=15/30 的结果，区分统计信号贡献与模型互补收益。
+- **无损推理加速**：预计算 Log-Lift、CSR 转移存储、用户级奖励表、GPU 批量索引、已见 SID 过滤，以及仅重排 Self-Attention KV Cache。
+- **输出验收**：完整 Validation 逐样本核对 Top-10 SID 与顺序，并核对最终全部 Beam；小样本进一步检查三层路径及 FP32 原始累计分数。
 
-Following [TIGER](https://arxiv.org/abs/2305.05065), [LC-Rec](https://arxiv.org/abs/2311.09049), and [OpenOneRec](https://arxiv.org/abs/2512.24762):
+CoTIGER 的主要实现位于 `cotiger/`。`genrec/` 保留上游模型、数据及训练基础设施；本项目沿用原始 T5 结构与既有 100-epoch TIGER checkpoint，校准过程无需梯度训练。
 
-- **Dataset**: Amazon 2014 with 5-core filtering (users and items with < 5 interactions removed)
-- **Split**: Leave-one-out (last item for test, second-to-last for validation, rest for training)
-- **Ranking**: Full-item-set ranking over all items (no negative sampling)
-- **Max sequence length**: 50 for all models
-- **Metrics**: Recall@K and NDCG@K (K=5, 10)
-- **HSTU**: Tested with both full-vocabulary cross-entropy (CE) and sampled softmax (SS, 128 negatives, temp=0.05, L2 norm)
-- **Note**: OneRec-SFT numbers are temporarily withheld. Its RQ-KMeans Semantic IDs collide (distinct items sharing one SID), which inflates SID-matched Recall; corrected, collision-aware numbers will be added once finalized. See `docs/zh/reproduction-roadmap.md` (T0-3).
+## 实验结果
 
-### Amazon 2014 Beauty
+Amazon Beauty 5-core：Train **131,413** 条，Validation **22,363** 条；12,101 个商品对应 **11,401** 个唯一三位 SID。下表为完整 Validation 的 **SID 匹配指标**，数值均为百分比。
 
-| Methods | R@5 | R@10 | N@5 | N@10 |
-|---------|-----|------|-----|------|
-| SASRec (CE) | 0.0538 | 0.0851 | 0.0320 | 0.0421 |
-| SASRec (BCE) | 0.0258 | 0.0503 | 0.0137 | 0.0216 |
-| HSTU (CE) | 0.0568 | 0.0859 | 0.0347 | 0.0441 |
-| HSTU (SS) | 0.0414 | 0.0727 | 0.0235 | 0.0335 |
-| TIGER | 0.0419 | 0.0644 | 0.0282 | 0.0354 |
-| LCRec | 0.0481 | 0.0704 | 0.0331 | 0.0403 |
-| RPG (sentence-t5-xl) | 0.0525 | 0.0744 | 0.0363 | 0.0433 |
-| RPG (text-emb-3-large) | 0.0531 | 0.0780 | 0.0370 | 0.0450 |
-| RPG (paper, text-emb-3-large) | 0.0569 | 0.0809 | - | 0.0464 |
+| 方法 | Beam | Recall@5 | Recall@10 | NDCG@5 | NDCG@10 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 原版 TIGER | 15 | 5.9742 | 8.9120 | 3.9788 | 4.9222 |
+| CoTIGER（默认） | 15 | 8.2100 | **11.4341** | 5.6649 | **6.7024** |
+| 原版 TIGER | 30 | 6.0010 | 9.0328 | 4.0081 | 4.9823 |
+| CoTIGER | 30 | 8.2458 | **11.5369** | 5.6926 | **6.7532** |
+| 纯 SID 转移统计（最近三项，平滑 20） | 全目录 Top-10 | — | 10.2178 | — | 6.4953 |
 
-### Amazon 2014 Sports
+默认 Beam=15 的 Recall@10 相对原版提高 **28.30%**，绝对提高 **2.5220 个百分点**。Beam=30 相对原版提高 **27.72%**，相对较强的纯统计基线提高 **12.91%**。
 
-| Methods | R@5 | R@10 | N@5 | N@10 |
-|---------|-----|------|-----|------|
-| SASRec (CE) | 0.0321 | 0.0495 | 0.0191 | 0.0248 |
-| SASRec (BCE) | 0.0156 | 0.0291 | 0.0085 | 0.0128 |
-| HSTU (CE) | 0.0283 | 0.0439 | 0.0182 | 0.0232 |
-| HSTU (SS) | 0.0246 | 0.0393 | 0.0143 | 0.0191 |
-| TIGER | 0.0236 | 0.0377 | 0.0150 | 0.0195 |
-| LCRec | 0.0238 | 0.0360 | 0.0159 | 0.0198 |
+统计推荐器本身已有较强效果，收益包含额外的协同信号。历史 Test 结果中，CoTIGER 全 30 相对纯统计基线的 Recall@10 为 8.5722% vs 7.9730%，NDCG@10 为 5.0632% vs 5.0925%；没有在所有指标上超过统计基线。Test 已用于历史分析，不能视为尚未接触的全盲测试。完整对照与限制见[实验记录](docs/generated/tiger_prefix_ft_beauty_20261013/cotiger_results.md)。
 
-### Amazon 2014 Toys
+### 无损加速
 
-| Methods | R@5 | R@10 | N@5 | N@10 |
-|---------|-----|------|-----|------|
-| SASRec (CE) | 0.0613 | 0.0922 | 0.0348 | 0.0448 |
-| SASRec (BCE) | 0.0353 | 0.0594 | 0.0186 | 0.0264 |
-| HSTU (CE) | 0.0611 | 0.0914 | 0.0363 | 0.0461 |
-| HSTU (SS) | 0.0494 | 0.0795 | 0.0277 | 0.0375 |
-| TIGER | 0.0340 | 0.0521 | 0.0214 | 0.0272 |
-| LCRec | 0.0433 | 0.0614 | 0.0310 | 0.0368 |
+RTX 4060 Laptop GPU（8187.5 MiB），PyTorch 2.6.0+cu124；相同 Batch=64、FP16 前向、FP32 LogSoftmax 和累计分数。下表比较**同一校准算法**优化前后，采用同进程交错执行、每次完整预热、两次热运行的中位数，计时包含评估及相同的 CPU 输出收集，不含加载与落盘。
 
-### Amazon 2014 Home
+| Beam | 校准参考实现 | 优化实现 | 加速比 | 峰值显存（前 → 后） | 优化后吞吐量 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 15 | 18.91 s | **10.48 s** | **1.80×** | 1918 → 1082 MiB | 2134 条/s |
+| 30 | 30.86 s | **16.61 s** | **1.86×** | 3807 → 2046 MiB | 1346 条/s |
 
-| Methods | R@5 | R@10 | N@5 | N@10 |
-|---------|-----|------|-----|------|
-| SASRec (CE) | 0.0177 | 0.0277 | 0.0106 | 0.0138 |
-| SASRec (BCE) | 0.0081 | 0.0143 | 0.0046 | 0.0066 |
-| HSTU (CE) | 0.0129 | 0.0208 | 0.0084 | 0.0109 |
-| HSTU (SS) | 0.0123 | 0.0193 | 0.0079 | 0.0102 |
-| TIGER | 0.0145 | 0.0231 | 0.0096 | 0.0123 |
-| LCRec | 0.0163 | 0.0234 | 0.0110 | 0.0133 |
+完整 Validation 的 Top-10 SID、顺序及最终全部 Beam **完全一致**。不同时间段的 Windows/GPU 耗时有明显波动；不能把旧日志中的 76.35 s 与另一时间段的 16.61 s 相除作为加速比。
 
-## Features
+## 快速复现
 
-- **Multiple Models**: Implementations of SASRec, HSTU, RQVAE, TIGER, LCRec, COBRA, RPG, and NoteLLM
-- **Multiple Datasets**: Amazon 2014 (Beauty, Sports, Toys, Clothing) and Amazon 2023 (32 categories)
-- **Modular Design**: Clean separation of models, data, and training logic
-- **Flexible Configuration**: Gin-config based experiment management
-- **Easy Extension**: Add custom datasets and models with minimal code
-- **Reproducible**: Consistent evaluation metrics (Recall@K, NDCG@K) with W&B logging
+### 1. 安装
 
-## Models
-
-| Model | Type | Description |
-|-------|------|-------------|
-| **SASRec** | Baseline | Self-Attentive Sequential Recommendation |
-| **HSTU** | Baseline | Hierarchical Sequential Transduction Unit with temporal bias |
-| **RQVAE** | Generative | Residual Quantized VAE for semantic ID generation |
-| **TIGER** | Generative | Generative Retrieval with trie-based constrained decoding |
-| **LCRec** | Generative | LLM-based recommendation with collaborative semantics |
-| **COBRA** | Generative | Cascaded sparse-dense representations |
-| **RPG** | Generative | Parallel generation with OPQ semantic IDs and graph-constrained decoding |
-| **NoteLLM** | Generative | Retrievable LLM for note recommendation (experimental) |
-
-## Installation
-
-### From Source (Recommended)
+在有 CUDA 的机器上使用 Python 3.11。验证环境的依赖版本记录在 `requirements.txt`；不要在已有环境中盲目覆盖 PyTorch。
 
 ```bash
-git clone https://github.com/phonism/genrec.git
-cd genrec
-pip install -e .
+git clone https://github.com/wdyy20041223/CoTIGER.git
+cd CoTIGER
+conda env create -f environment.yml
+conda activate cotiger
 ```
 
-### Full Installation (with Triton, TorchRec, etc.)
+`environment.yml` 对应 Windows + CUDA 12.4。Linux 或已有 CUDA 环境可先安装匹配驱动的 PyTorch，再运行 `pip install -r requirements.txt` 和 `pip install -e ".[cotiger]"`。复现实验请尽量保持 PyTorch、精度、Batch 及 Padding 相同；不同 GPU 内核可能影响接近并列的 FP16 排序。
+
+### 2. 获取必要资产
+
+下载 [Beauty v1 发布包](https://github.com/wdyy20041223/CoTIGER/releases/tag/beauty-v1) 中的 `cotiger-beauty-inference-v1.zip`，在仓库根目录解压。包内提供冻结权重、配置、SID、Train/Validation 加工数据、Train 统计及参考预测，不需要下载 Sentence-T5 或重新训练 RQ-VAE。
+
+```text
+artifacts/beauty/
+├── best_model.pt
+├── model_config.json
+├── item_semantic_ids.npy
+├── train_samples.parquet
+├── valid_samples.parquet
+├── train_statistics.npz
+├── manifest.json
+├── reference/                 # 原版与校准方法的完整 Validation 预测
+└── evidence/                  # 原始实验摘要与逐样本一致性证明
+```
+
+发布包附有 SHA256 校验文件；逐文件来源、大小和摘要见[资产清单](docs/generated/tiger_prefix_ft_beauty_20261013/cotiger_artifacts.json)。数据及权重作为实验资产单独发布，Git 历史仅保存代码和必要说明。
+
+### 3. 小样本核对与完整评估
+
+以下命令均从仓库根目录执行；`--output` 必须是尚不存在的目录，避免覆盖结果。
 
 ```bash
-pip install -e ".[full]"
+# CPU 边界检查，无需下载权重
+python -m unittest discover -s tests -p test_cotiger.py -v
+
+# 首批 64 条真实 Validation：与发布包中的同批次参考预测严格比较
+python -m cotiger.evaluate --max-samples 64 --check-reference --output out/cotiger/smoke15
+python -m cotiger.evaluate --beam 30 --max-samples 64 --check-reference --output out/cotiger/smoke30
+
+# 完整 Validation；默认全三层 Beam=15、GPU CSR 先验
+python -m cotiger.evaluate --warmup-full --check-reference --output out/cotiger/valid15
+python -m cotiger.evaluate --beam 30 --warmup-full --check-reference --output out/cotiger/valid30
+
+# 同一 checkpoint 的原版 TIGER
+python -m cotiger.evaluate --method tiger --check-reference --output out/cotiger/original15
+
+# 保留的校准参考实现；用于和 fast 实现比较
+python -m cotiger.evaluate --engine reference --beam 30 --warmup-full --check-reference --output out/cotiger/reference30
+
+# 纯统计基线，无需运行 TIGER 或使用 GPU
+python -m cotiger.transition_baseline --output out/cotiger/sid_markov
 ```
 
-### Dependencies Only
+每次评估输出 `result.json`（四项指标、耗时、吞吐量、显存）及 `predictions.npz`（逐样本有序 SID 与 sample_id）。`--check-reference` 比较最终全部 Beam，而不只是聚合指标。严格参考核对固定 Batch=64；小样本必须取完整 Batch。
+
+`--repeats 2` 可重复热运行；`--prior-backend cpu` 使用等价的 CPU 用户级奖励表。性能测试请将 reference 与 fast 的执行顺序交错，并报告本机实测；不要直接套用上表秒数。
+
+### 4. 核对 Train 统计来源
 
 ```bash
-pip install -r requirements.txt
+python -m cotiger.statistics --output out/cotiger/rebuilt_train_statistics.npz
 ```
 
-## Quick Start
+此步骤只读取发布包内的 131,413 条 Train，不进行模型训练。统计来自最后一个历史 SID 到目标 SID 的观察转移，Validation 目标不进入计数。重建文件可按 NPZ 中的各个数组逐一核对。
 
-### Train Baseline Models
+## 评分规则与代码
 
-```bash
-# SASRec on Amazon 2014
-python genrec/trainers/sasrec_trainer.py config/sasrec/amazon.gin --split beauty
+对深度 `d` 的候选前缀 `p`：
 
-# HSTU on Amazon 2014
-python genrec/trainers/hstu_trainer.py config/hstu/amazon.gin --split beauty
-
-# SASRec on Amazon 2023
-python genrec/trainers/sasrec_trainer.py config/sasrec/amazon2023.gin
-
-# HSTU on Amazon 2023
-python genrec/trainers/hstu_trainer.py config/hstu/amazon2023.gin
+```text
+lift(h,p) = log(1 + C_train(h,p) / (20 * P_global(p)))
+bonus(H,p) = Σ_age 0.5^age * lift(history[-1-age],p)
+selection_score = raw_cumulative_logP + alpha[d] * bonus(H,p)
+alpha = [0, 0.4, 0.4]
 ```
 
-### Train RQVAE (Semantic ID Generator)
+最近三项中的重复 SID 只使用最近一次，保留原始时间距离。每一层重新计算该层前缀奖励，奖励不累计到下一层原始 LogP。D3 对历史中已见且仅对应单个商品的 SID 减 1000 分；SID 碰撞组保留。三层始终搜索完整 769 词表，未匹配合法前缀的候选奖励为 0。默认全三层 Beam=15，未启用 Trie 或位置码本过滤。
 
-```bash
-# For TIGER pipeline
-python genrec/trainers/rqvae_trainer.py config/tiger/amazon/rqvae.gin --split beauty
+| 文件 | 职责 |
+| --- | --- |
+| `cotiger/evaluate.py` | 冻结模型加载、原评估器复用、输出核对及计时 |
+| `cotiger/prior.py` | 原校准公式与字典参考实现 |
+| `cotiger/reference.py` | 保留实际逐层 Top-K 的搜索参考实现 |
+| `cotiger/decoding.py` | 紧凑索引、CSR GPU 查表、奖励复用及 KV Cache 优化 |
+| `cotiger/statistics.py` | 从固定 Train 重建转移统计 |
+| `cotiger/transition_baseline.py` | 最近三项平滑 SID Markov 基线 |
+| `cotiger/data.py`、`cotiger/ids.py` | 相同历史截断、左 Padding、Offset 与 SID 索引 |
+| `tests/test_cotiger.py` | 路径、分数与先验边界检查 |
 
-# For LCRec pipeline
-python genrec/trainers/rqvae_trainer.py config/lcrec/amazon/rqvae.gin --split beauty
+更详细的公式、搜索行为和优化边界见[方法说明](docs/generated/tiger_prefix_ft_beauty_20261013/cotiger_design.md)。历史微调权重、原始大规模 Beam 轨迹、云端操作脚本及过程文档未纳入当前发布内容。
 
-# For COBRA pipeline
-python genrec/trainers/rqvae_trainer.py config/cobra/amazon/rqvae.gin --split beauty
-```
+## 来源与许可
 
-### Train TIGER (Generative Retrieval)
+模型、RQ-VAE、T5 及原始训练/评估基础设施来自 [phonism/GenRec](https://github.com/phonism/genrec)，保留上游代码与作者信息。本项目的工作集中于历史转移校准、对照分析、推理优化和输出验证；不将上游 TIGER/RQ-VAE 描述为个人原创。
 
-```bash
-# Requires pretrained RQVAE checkpoint
-python genrec/trainers/tiger_trainer.py config/tiger/amazon/tiger.gin --split beauty
-```
-
-### Train LCRec (LLM-based)
-
-```bash
-# Requires pretrained RQVAE checkpoint
-python genrec/trainers/lcrec_trainer.py config/lcrec/amazon/lcrec.gin --split beauty
-
-# On Amazon 2023
-python genrec/trainers/lcrec_trainer.py config/lcrec/amazon2023/lcrec.gin
-```
-
-### Train COBRA
-
-```bash
-# Requires pretrained RQVAE checkpoint
-python genrec/trainers/cobra_trainer.py config/cobra/amazon/cobra.gin --split beauty
-```
-
-### Train RPG (Parallel Generation)
-
-```bash
-# RPG on Amazon 2014
-python -m genrec.trainers.rpg_trainer config/rpg/amazon.gin --split beauty
-
-# Multi-GPU
-bash scripts/train_rpg.sh beauty 4
-```
-
-### Train OneRec (RQ-KMeans → SFT)
-
-Trains the **OneRec-SFT (1.7B)** pipeline (RQ-KMeans K=256 → SFT). Benchmark numbers are
-withheld pending SID-collision correction (see the note under Benchmark Results).
-Requires `Qwen3-Embedding-8B` + `Qwen3-1.7B` in `./models_hub/`.
-
-```bash
-# Stage 1 — RQ-KMeans quantizer (K=256, 3 codebooks). Item embeddings are generated
-# automatically from Qwen3-Embedding-8B on first run.
-python genrec/trainers/rqkmeans_trainer.py config/onerec/amazon/rqkmeans.gin --split beauty
-
-# Stage 2 — SFT (Qwen3-1.7B, full-param), 4-GPU. The v2b recipe (no label smoothing) is
-# the current best and produces the benchmark numbers above.
-accelerate launch --config_file config/accelerate_4gpu.yaml \
-    -m genrec.trainers.onerec_sft_trainer config/onerec/amazon/sft.gin --split beauty
-```
-
-> **Recipe** (`sft.gin`): `lr=8e-5, weight_decay=0.05,
-> attention_dropout=0.1, label_smoothing=0.0, early_stopping_patience=2`. Use K=256 (not
-> 8192) on small catalogs — larger codebooks collapse on shallow residuals.
-
-## Configuration
-
-### Dataset Selection
-
-```bash
-# Amazon 2014 datasets (via --split)
---split beauty    # Beauty
---split sports    # Sports and Outdoors
---split toys      # Toys and Games
---split clothing  # Clothing, Shoes and Jewelry
-
-# Amazon 2023 datasets use dedicated config files
-config/sasrec/amazon2023.gin
-config/hstu/amazon2023.gin
-config/lcrec/amazon2023/lcrec.gin
-```
-
-### Parameter Override
-
-```bash
---gin "param=value"
-```
-
-### Examples
-
-```bash
-# Change epochs and batch size
-python genrec/trainers/tiger_trainer.py config/tiger/amazon/tiger.gin \
-    --split beauty \
-    --gin "train.epochs=200" \
-    --gin "train.batch_size=128"
-
-# Custom model path for LCRec
-python genrec/trainers/lcrec_trainer.py config/lcrec/amazon/lcrec.gin \
-    --split beauty \
-    --gin "MODEL_HUB_QWEN3_1_7B='/path/to/model'"
-```
-
-## Project Structure
-
-```
-genrec/
-├── genrec/
-│   ├── models/          # Model implementations
-│   │   ├── sasrec.py        # SASRec
-│   │   ├── hstu.py          # HSTU
-│   │   ├── rqvae.py         # RQVAE
-│   │   ├── tiger.py         # TIGER
-│   │   ├── lcrec.py         # LCRec
-│   │   ├── cobra.py         # COBRA
-│   │   ├── rpg.py           # RPG
-│   │   └── notellm.py       # NoteLLM
-│   ├── trainers/        # Training scripts
-│   │   ├── sasrec_trainer.py
-│   │   ├── hstu_trainer.py
-│   │   ├── rqvae_trainer.py
-│   │   ├── tiger_trainer.py
-│   │   ├── lcrec_trainer.py
-│   │   ├── cobra_trainer.py
-│   │   ├── rpg_trainer.py
-│   │   └── trainer_utils.py
-│   ├── modules/         # Reusable components
-│   │   ├── transformer.py   # Transformer blocks
-│   │   ├── embedding.py     # Embedding layers
-│   │   ├── encoder.py       # Encoder modules
-│   │   ├── metrics.py       # Recall@K, NDCG@K
-│   │   ├── loss.py          # Loss functions
-│   │   ├── scheduler.py     # LR schedulers
-│   │   ├── kmeans.py        # K-means for RQVAE init
-│   │   ├── gumbel.py        # Gumbel softmax
-│   │   └── normalize.py     # Normalization layers
-│   └── data/            # Dataset implementations
-│       ├── amazon.py        # Amazon 2014 datasets
-│       ├── amazon2023.py    # Amazon 2023 datasets (32 categories)
-│       ├── amazon_sasrec.py # SASRec-specific data
-│       ├── amazon_hstu.py   # HSTU-specific data
-│       ├── amazon_lcrec.py  # LCRec-specific data
-│       ├── amazon_cobra.py  # COBRA-specific data
-│       ├── amazon_rpg.py    # RPG-specific data (OPQ tokenization)
-│       └── p5_amazon.py     # P5-format data
-├── config/              # Gin configuration files
-│   ├── base.gin             # Base config
-│   ├── sasrec/              # SASRec configs
-│   ├── hstu/                # HSTU configs
-│   ├── tiger/               # TIGER configs (amazon/)
-│   ├── lcrec/               # LCRec configs (amazon/, amazon2023/)
-│   ├── cobra/               # COBRA configs
-│   └── rpg/                 # RPG configs
-├── scripts/             # Utility scripts
-├── docs/                # Documentation (English & Chinese)
-├── assets/              # Media assets
-└── reference/           # Reference implementations
-```
-
-## Documentation
-
-Full documentation is available at [https://phonism.github.io/genrec](https://phonism.github.io/genrec)
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guide](docs/en/contributing.md) for details.
-
-## Citation
-
-If you find this project useful, please cite:
-
-```bibtex
-@software{genrec2025,
-  title = {GenRec: A Model Zoo for Generative Recommendation},
-  author = {Qi Lu},
-  year = {2025},
-  url = {https://github.com/phonism/genrec}
-}
-```
-
-## References
-
-- [SASRec](https://arxiv.org/abs/1808.09781): Self-Attentive Sequential Recommendation
-- [HSTU](https://arxiv.org/abs/2402.17152): Hierarchical Sequential Transduction Units
-- [TIGER](https://arxiv.org/abs/2305.05065): Recommender Systems with Generative Retrieval
-- [RQ-VAE-Recommender](https://github.com/EdoardoBotta/RQ-VAE-Recommender) by Edoardo Botta
-- [LC-Rec](https://arxiv.org/abs/2311.09049): LLM-based Collaborative Recommendation
-- [COBRA](https://arxiv.org/abs/2503.02453): Cascaded Sparse-Dense Representations
-- [RPG](https://arxiv.org/abs/2506.05781): Recommendation with Parallel Generation ([official code](https://github.com/facebookresearch/RPG_KDD2025))
-- [NoteLLM](https://arxiv.org/abs/2403.01744): A Retrievable LLM for Note Recommendation
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+代码沿用 [MIT License](LICENSE)。Beauty 来自 Amazon Reviews；加工数据与实验权重是复现资产，使用时仍需遵守源数据的使用条件。当前结果针对这一数据集、checkpoint 和 SID 级评价协议，尚未证明跨数据集泛化或独立商品级检索效果。

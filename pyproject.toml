@@ -3,14 +3,15 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "genrec"
+name = "cotiger"
 version = "0.1.0"
-description = "A Model Zoo for Generative Recommendation"
+description = "Collaborative-Guided TIGER for Generative Retrieval, built on GenRec"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Qi Lu", email = "luqi.code@gmail.com"}
 ]
+maintainers = [{name = "wdyy20041223"}]
 keywords = ["recommendation", "generative", "deep-learning", "pytorch", "transformers"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -40,6 +41,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cotiger = ["pyarrow>=14.0.0"]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -61,14 +63,14 @@ full = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/phonism/genrec"
-Documentation = "https://phonism.github.io/genrec"
-Repository = "https://github.com/phonism/genrec"
-Issues = "https://github.com/phonism/genrec/issues"
+Homepage = "https://github.com/wdyy20041223/CoTIGER"
+Documentation = "https://github.com/wdyy20041223/CoTIGER#readme"
+Repository = "https://github.com/wdyy20041223/CoTIGER"
+Issues = "https://github.com/wdyy20041223/CoTIGER/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["genrec*"]
+include = ["genrec*", "cotiger*"]
 
 [tool.black]
 line-length = 100

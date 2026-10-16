@@ -1,0 +1,139 @@
+{
+  "project": "CoTIGER",
+  "release": "beauty-v1",
+  "layout": "artifacts/beauty",
+  "train_samples": 131413,
+  "validation_samples": 22363,
+  "items": 12101,
+  "unique_sids": 11401,
+  "checkpoint": "Original GenRec TIGER, 100-epoch Beauty run, not fine-tuned",
+  "no_cloud_credentials": true,
+  "no_raw_beam_probability_shards": true,
+  "files": [
+    {
+      "path": "best_model.pt",
+      "bytes": 18275042,
+      "sha256": "f1628a38656353e115b2739fc9c9c0ffdec74fcaf808cdbb6ef5ea615b0e4760",
+      "source": "out/cloud_reproduction/tiger_beauty_fast_20261012_194804/run/tiger/best_model.pt"
+    },
+    {
+      "path": "evidence/benchmark_summary.json",
+      "bytes": 14361,
+      "sha256": "377f545b073e62796c1c36668453b20a529fcc358924036fe11b1361180ee6d8",
+      "source": "curated local verification"
+    },
+    {
+      "path": "evidence/packaging_checks.json",
+      "bytes": 1152,
+      "sha256": "909262a036cee194461ec46d663d3b5c30561432b5ee42b1be1243553cdc3299",
+      "source": "curated local verification"
+    },
+    {
+      "path": "evidence/top10_equivalence.parquet",
+      "bytes": 6463921,
+      "sha256": "3adc4189c1225954fbfe60211f0f206f075d66810becc5f13aa74ea138db9318",
+      "source": "out/tiger_prefix_ft/beauty_prior_speed_20261016/top10_equivalence.parquet"
+    },
+    {
+      "path": "evidence/transition_selection_lock.json",
+      "bytes": 1678,
+      "sha256": "7ba24c16c87a3d85c8f0fd7b40c9b513d0516cf29554d85c38dae9d1cdb36018",
+      "source": "out/tiger_prefix_ft/beauty_transition_baselines_20261016/selection_lock.json"
+    },
+    {
+      "path": "evidence/transition_test_summary.json",
+      "bytes": 9620,
+      "sha256": "53f2f6473f37e938e8183b187c0b030926e5b2c8c282c890a592473d936f5265",
+      "source": "out/tiger_prefix_ft/beauty_transition_baselines_20261016/test_summary.json"
+    },
+    {
+      "path": "evidence/transition_valid_summary.json",
+      "bytes": 9609,
+      "sha256": "ab18c7db69545dcabb1f3e089838bb86980eb03a34f4b0c2b8e9bced769b1399",
+      "source": "out/tiger_prefix_ft/beauty_transition_baselines_20261016/valid_summary.json"
+    },
+    {
+      "path": "item_semantic_ids.npy",
+      "bytes": 72734,
+      "sha256": "092d032481643efcc093863a1994f22198c942a195329205a2b0931df13184a1",
+      "source": "out/cloud_reproduction/tiger_beauty_fast_20261012_194804/analysis/item_semantic_ids.npy"
+    },
+    {
+      "path": "model_config.json",
+      "bytes": 297,
+      "sha256": "7774ea8b491bdb310154912b89e28ae52e3abe3c851a75459cea0763453f9f6c",
+      "source": "out/cloud_reproduction/tiger_beauty_fast_20261012_194804/analysis/model_config.json"
+    },
+    {
+      "path": "reference/original15.json",
+      "bytes": 601,
+      "sha256": "c9a789f965f83d839ed9835512f14db0e5a2ab4b5da24af25ad424ea7d9bed8e",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/production_benchmark_valid/original15.json"
+    },
+    {
+      "path": "reference/original15_predictions.npz",
+      "bytes": 704520,
+      "sha256": "8fdec0b01545c2f6e81ec13e5dac93d0270fd1af2b0f182752f9e4e187f76c9d",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/production_benchmark_valid/original15_predictions.npz"
+    },
+    {
+      "path": "reference/original30.json",
+      "bytes": 599,
+      "sha256": "49f83fedc09bc41b882a34605f6fd35a549d846b638e896ec3de721434ca1937",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/production_benchmark_valid/original30.json"
+    },
+    {
+      "path": "reference/original30_predictions.npz",
+      "bytes": 1506551,
+      "sha256": "77b6d4504e0371db42e7e1e5c0f9715effe937ca8393e15003ae46aa7cfbe53c",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/production_benchmark_valid/original30_predictions.npz"
+    },
+    {
+      "path": "reference/prior15.json",
+      "bytes": 625,
+      "sha256": "5110db8761fd00ba95706684da9beba63981105d284d1b54364aa50ce42249aa",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/production_benchmark_valid/prior15.json"
+    },
+    {
+      "path": "reference/prior15_predictions.npz",
+      "bytes": 752554,
+      "sha256": "95310a628ad073a1fc650c60c4035fb49cdb0a25a7be4d2d917b07991c008313",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/production_benchmark_valid/prior15_predictions.npz"
+    },
+    {
+      "path": "reference/prior30.json",
+      "bytes": 625,
+      "sha256": "9fa7c83e728921b891c94ba1a15671b732af98659fe20edd687a238f2ea8cfad",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/production_benchmark_valid/prior30.json"
+    },
+    {
+      "path": "reference/prior30_predictions.npz",
+      "bytes": 1571759,
+      "sha256": "bdad39b2e56585cc5eeadd5ca2360b9e30c5d54ea4bea62799a40963a38ae66f",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/production_benchmark_valid/prior30_predictions.npz"
+    },
+    {
+      "path": "train_samples.parquet",
+      "bytes": 4220593,
+      "sha256": "b147892bb90c19ee1f3044c6c8937fda57e91be998af4f3be6d85fe959bb4c8c",
+      "source": "out/tiger_prefix_ft/beauty_20261013/data/train_samples.parquet"
+    },
+    {
+      "path": "train_statistics.npz",
+      "bytes": 927871,
+      "sha256": "2572eab100dc60eb0286cc34649f298efdbbffce39b2277a2d116043b3d0f6e7",
+      "source": "out/tiger_prefix_ft/beauty_inference_optimization_20261016/train_statistics.npz"
+    },
+    {
+      "path": "valid_samples.parquet",
+      "bytes": 1264783,
+      "sha256": "0eb4a78b72c4eca4a52c860a39431a0c6e098e4ee7e720e2630f8c6c200b2d45",
+      "source": "out/cloud_reproduction/tiger_beauty_fast_20261012_194804/analysis/valid_samples.parquet"
+    }
+  ],
+  "download": {
+    "url": "https://github.com/wdyy20041223/CoTIGER/releases/download/beauty-v1/cotiger-beauty-inference-v1.zip",
+    "bytes": 32851867,
+    "sha256": "07364a212a40014a8c0bb537c36cdd24632760b4346e375e06a4f8232ea4d048"
+  }
+}

@@ -200,6 +200,17 @@ models_hub/
 wandb/
 .wandb/
 
+# Generated experiment records; Markdown guides stay versioned.
+docs/generated/*.json
+docs/generated/*.zip
+docs/generated/sid_similarity_*/*.json
+docs/generated/sid_similarity_*/sid_similarity_pairs.csv
+docs/generated/sid_similarity_*/sid_similarity_pairs.parquet
+
+# Frozen-model error-head smoke caches and real user trajectories.
+docs/generated/tiger_error_smoke_*/outputs/
+docs/generated/tiger_error_smoke_*/raw_collection*/
+
 # Local dev artifacts, media, and vendored third-party projects
 # (not part of the reproducible GenRec codebase)
 .DS_Store
@@ -209,3 +220,27 @@ video/
 assets/
 reference/
 GRLM/
+
+# CoTIGER public package: keep historical experiments and private operations local.
+/tiger_prefix_ft/
+/artifacts/
+*.pt
+*.pth
+*.safetensors
+*.npz
+*.npy
+*.parquet
+.env.*
+*.pem
+*.key
+/docs/*
+!/docs/generated/
+/docs/generated/*
+!/docs/generated/tiger_prefix_ft_beauty_20261013/
+/docs/generated/tiger_prefix_ft_beauty_20261013/*
+!/docs/generated/tiger_prefix_ft_beauty_20261013/cotiger_design.md
+!/docs/generated/tiger_prefix_ft_beauty_20261013/cotiger_results.md
+!/docs/generated/tiger_prefix_ft_beauty_20261013/cotiger_artifacts.json
+/mkdocs.yml
+/requirements-docs.txt
+/.github/workflows/docs.yml

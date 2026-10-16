@@ -1,0 +1,25 @@
+# Windows x64, NVIDIA GPU. Use official channels only.
+# Run from the repository root: conda env create -f environment.yml
+# After activation, keep future Conda installs on official channels:
+# Copy-Item config/condarc.official.yml "$env:CONDA_PREFIX/.condarc"
+name: cotiger
+channels:
+  - https://repo.anaconda.com/pkgs/main
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - --index-url https://pypi.org/simple
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch==2.6.0+cu124
+      - -r requirements.txt
+      - -e .
+variables:
+  PIP_CONFIG_FILE: NUL
+  PIP_INDEX_URL: https://pypi.org/simple
+  PIP_EXTRA_INDEX_URL: ''
+  PIP_FIND_LINKS: ''
+  PIP_TRUSTED_HOST: ''
+  PIP_NO_INDEX: 'false'
+  ACCELERATE_USE_CPU: 'false'
